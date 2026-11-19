@@ -32,6 +32,17 @@ type AliquotaVigencia struct {
 	Observacao     *string
 }
 
+// IBSSimplesNacional é a alíquota de IBS que o motor do Simples espera em
+// pIBSSN.
+//
+// No Simples não existe separação entre IBS estadual e municipal: o motor aplica
+// pIBSSN uma única vez sobre a base e o vIBSSN que sai é o IBS inteiro. Mandar
+// só a parcela estadual faz o imposto sair pela metade, e uma nota subdeclarada
+// passaria como conforme — o oposto do que o produto existe para fazer.
+func (a AliquotaVigencia) IBSSimplesNacional() decimal.Decimal {
+	return a.IBSEstadual.Add(a.IBSMunicipal)
+}
+
 // Aplicavel diz se a linha pode ser usada para esta competência e recorte
 // geográfico. Recorte é aplicabilidade, não preferência: linha de SP não vale
 // para nota do RS nem na falta de outra.

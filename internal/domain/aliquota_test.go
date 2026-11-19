@@ -120,3 +120,16 @@ func TestNenhumaCandidataRecusa(t *testing.T) {
 		t.Error("lista vazia deveria recusar")
 	}
 }
+
+// O Simples não separa IBS estadual de municipal: pIBSSN é o IBS inteiro.
+func TestIBSDoSimplesSomaEstadualEMunicipal(t *testing.T) {
+	a := linha() // 0.05 estadual + 0.05 municipal
+
+	if got := a.IBSSimplesNacional(); !got.Equal(decimal.RequireFromString("0.1")) {
+		t.Errorf("IBSSimplesNacional() = %s, esperava 0.1", got)
+	}
+	// A parcela estadual sozinha era o defeito: metade do imposto.
+	if a.IBSSimplesNacional().Equal(a.IBSEstadual) {
+		t.Error("IBS do Simples não pode ser igual à parcela estadual")
+	}
+}

@@ -59,9 +59,9 @@ type respostaSimples struct {
 	} `json:"objetos"`
 }
 
-func (m *SimplesNacional) Calcular(
-	ctx context.Context, doc domain.DocumentoFiscal, aliquota domain.AliquotaVigencia,
-) (app.ResultadoMotor, error) {
+func (m *SimplesNacional) montaRequisicao(
+	doc domain.DocumentoFiscal, aliquota domain.AliquotaVigencia,
+) map[string]any {
 	itens := make([]itemSimples, 0, len(doc.Itens))
 	for _, item := range doc.Itens {
 		valorIS := "0.00"
@@ -75,7 +75,9 @@ func (m *SimplesNacional) Calcular(
 		itens = append(itens, itemSimples{
 			Numero: item.Numero, CAtivSN: item.CAtivSN, CClassTrib: item.CClassTrib,
 			BaseCalculo: baseCalculo, ValorImpostoSeletivo: valorIS,
-			PIBSSN: aliquota.IBSEstadual.String(), PCBSSN: aliquota.CBS.String(),
+			// pIBSSN é o IBS INTEIRO, não a parcela estadual: o Simples não
+			// separa estadual de municipal. Ver IBSSimplesNacional.
+			PIBSSN: aliquota.IBSSimplesNacional().String(), PCBSSN: aliquota.CBS.String(),
 		})
 	}
 
@@ -92,6 +94,13 @@ func (m *SimplesNacional) Calcular(
 	if doc.DhEmissao != nil {
 		requisicao["data"] = doc.DhEmissao.Format("2006-01-02")
 	}
+	return requisicao
+}
+
+func (m *SimplesNacional) Calcular(
+	ctx context.Context, doc domain.DocumentoFiscal, aliquota domain.AliquotaVigencia,
+) (app.ResultadoMotor, error) {
+	requisicao := m.montaRequisicao(doc, aliquota)
 
 	enviado, recebido, _, err := m.postar(
 		ctx, "/api/calculadora/observabilidade/simples-nacional", requisicao)
