@@ -18,6 +18,19 @@ const PrimeiroAnoSemAliquotaDeReferencia = 2027
 
 var ErrSemAliquotaVigente = errors.New("nenhuma alíquota vigente cobre a competência")
 
+// DiaDaCompetencia reduz o instante da emissão ao dia de calendário DELA, no
+// fuso do próprio documento, representado como meia-noite UTC — que é como as
+// colunas DATE de vigência chegam do banco.
+//
+// NÃO troque por time.Truncate: Truncate opera sobre a duração absoluta desde o
+// zero time, ancorado em UTC, e não sobre a forma de apresentação. Toda nota
+// emitida depois das 21:00 em Brasília seria truncada para o DIA SEGUINTE,
+// enquanto Year(), Month() e Day() continuariam dizendo o dia certo.
+func DiaDaCompetencia(instante time.Time) time.Time {
+	ano, mes, dia := instante.Date()
+	return time.Date(ano, mes, dia, 0, 0, 0, 0, time.UTC)
+}
+
 type AliquotaVigencia struct {
 	ID             int64
 	TenantID       *int64
@@ -36,11 +49,13 @@ type AliquotaVigencia struct {
 // geográfico. Recorte é aplicabilidade, não preferência: linha de SP não vale
 // para nota do RS nem na falta de outra.
 func (a AliquotaVigencia) Aplicavel(competencia time.Time, uf string, municipio *int32) bool {
-	dia := competencia.Truncate(24 * time.Hour)
-	if a.VigenciaInicio.After(dia) {
+	// Normalizar os dois lados é idempotente e impede que a comparação dependa
+	// de quem chamou ter normalizado antes.
+	dia := DiaDaCompetencia(competencia)
+	if DiaDaCompetencia(a.VigenciaInicio).After(dia) {
 		return false
 	}
-	if a.VigenciaFim != nil && a.VigenciaFim.Before(dia) {
+	if a.VigenciaFim != nil && DiaDaCompetencia(*a.VigenciaFim).Before(dia) {
 		return false
 	}
 	if a.UF != nil && *a.UF != uf {

@@ -124,7 +124,11 @@ func (c ConferirLote) resolveAliquota(
 	if doc.DhEmissao == nil {
 		return domain.AliquotaVigencia{}, errors.New("documento sem data de emissão")
 	}
-	competencia := *doc.DhEmissao
+	// O dia de calendário da nota, no fuso dela. O MESMO valor vai para o filtro
+	// do adaptador e para a regra de domínio: enquanto o adaptador consultava por
+	// data e o domínio truncava o instante em UTC, os dois discordavam exatamente
+	// na virada e a nota caía no vão entre os dois critérios.
+	competencia := domain.DiaDaCompetencia(*doc.DhEmissao)
 
 	candidatas, err := c.Aliquotas.Aplicaveis(ctx, tenantID, competencia, doc.UF, doc.Municipio)
 	if err != nil {

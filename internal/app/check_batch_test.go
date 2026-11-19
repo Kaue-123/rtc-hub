@@ -54,11 +54,17 @@ func (c *calculadoraFalsa) Calcular(
 type repoAliquotasFalso struct {
 	linhas []domain.AliquotaVigencia
 	err    error
+	// Onde anotar a competência recebida, quando o teste quiser conferi-la.
+	// Ponteiro para o duplo seguir sendo usado por valor nos outros testes.
+	competencia *time.Time
 }
 
 func (r repoAliquotasFalso) Aplicaveis(
-	context.Context, int64, time.Time, string, *int32,
+	_ context.Context, _ int64, competencia time.Time, _ string, _ *int32,
 ) ([]domain.AliquotaVigencia, error) {
+	if r.competencia != nil {
+		*r.competencia = competencia
+	}
 	return r.linhas, r.err
 }
 
@@ -263,5 +269,41 @@ func TestLoteVazioEhRecusado(t *testing.T) {
 	caso := app.ConferirLote{Repo: &repoFalso{}}
 	if _, err := caso.Executar(context.Background(), app.PedidoDeLote{TenantID: 1}); err == nil {
 		t.Error("lote sem arquivo deveria ser recusado")
+	}
+}
+
+// O filtro do adaptador e a regra de domínio precisam julgar a MESMA data. Era
+// aqui que a virada de vigência se perdia: o repositório consultava por dia de
+// calendário e o domínio truncava o instante em UTC, de modo que a nota do fim
+// do dia 31/12 não casava com nenhuma linha dos dois lados ao mesmo tempo.
+func TestRepositorioRecebeODiaDeCalendarioDaNotaENaoOInstante(t *testing.T) {
+	brasilia := time.FixedZone("-03", -3*60*60)
+	emissao := time.Date(2026, time.December, 31, 22, 0, 0, 0, brasilia)
+
+	doc := documento("3")
+	doc.DhEmissao = &emissao
+
+	var recebida time.Time
+	motor := &calculadoraFalsa{exigeAliquota: true}
+	caso := app.ConferirLote{
+		Leitor:       leitorFalso{doc: doc},
+		Calculadoras: map[string]app.Calculadora{domain.MotorRegimeRegular: motor},
+		Aliquotas: repoAliquotasFalso{
+			linhas:      []domain.AliquotaVigencia{aliquotaPadrao()},
+			competencia: &recebida,
+		},
+		Repo: &repoFalso{},
+	}
+
+	if _, err := caso.Executar(context.Background(), app.PedidoDeLote{
+		TenantID: 1, Arquivos: []app.Arquivo{{Nome: "nota.xml"}},
+	}); err != nil {
+		t.Fatalf("executar: %v", err)
+	}
+
+	esperada := time.Date(2026, time.December, 31, 0, 0, 0, 0, time.UTC)
+	if !recebida.Equal(esperada) {
+		t.Errorf("competência enviada ao repositório = %s, esperava %s",
+			recebida.Format(time.RFC3339), esperada.Format(time.RFC3339))
 	}
 }
