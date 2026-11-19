@@ -1,6 +1,8 @@
 package httpapi
 
 import (
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -8,17 +10,43 @@ import (
 	"github.com/Kaue-123/rtc-hub/internal/app"
 )
 
-func (s Servidor) criarLote(w http.ResponseWriter, r *http.Request) {
-	tenant := tenantDe(r.Context())
+// Quanto do multipart fica em memória. O resto vai para arquivo temporário, que
+// o net/http remove ao fim da requisição. NÃO é o teto do lote — o teto é
+// TamanhoMaxLoteBytes, imposto por MaxBytesReader.
+const memoriaDoMultipart = 8 << 20
 
-	if err := r.ParseMultipartForm(s.TamanhoMaxLoteBytes); err != nil {
-		erro(w, http.StatusRequestEntityTooLarge, "lote acima do limite: "+err.Error())
-		return
+// Usado quando o servidor foi montado sem limite: zero em MaxBytesReader
+// recusaria toda requisição, que é pior do que um teto generoso.
+const tamanhoMaxLotePadrao = 64 << 20
+
+// lerArquivosDoLote consome o multipart dentro do limite e devolve os arquivos.
+// Vive fora do handler para ser exercitável sem banco e sem tenant.
+func lerArquivosDoLote(w http.ResponseWriter, r *http.Request, limite int64) ([]app.Arquivo, bool) {
+	if limite <= 0 {
+		limite = tamanhoMaxLotePadrao
 	}
+	// ParseMultipartForm NÃO limita o tamanho da requisição: o argumento dela é
+	// quanto fica em memória, e a documentação é literal quanto ao resto —
+	// "the remainder stored on disk in temporary files". Sem MaxBytesReader
+	// qualquer upload passava, enchendo o disco, e o 413 que este handler
+	// prometia só disparava em multipart malformado.
+	r.Body = http.MaxBytesReader(w, r.Body, limite)
+
+	if err := r.ParseMultipartForm(memoriaDoMultipart); err != nil {
+		var excedeu *http.MaxBytesError
+		if errors.As(err, &excedeu) {
+			erro(w, http.StatusRequestEntityTooLarge,
+				fmt.Sprintf("lote acima do limite de %d bytes", limite))
+			return nil, false
+		}
+		erro(w, http.StatusBadRequest, "multipart inválido: "+err.Error())
+		return nil, false
+	}
+
 	cabecalhos := r.MultipartForm.File["arquivos"]
 	if len(cabecalhos) == 0 {
 		erro(w, http.StatusUnprocessableEntity, "envie ao menos um arquivo no campo 'arquivos'")
-		return
+		return nil, false
 	}
 
 	arquivos := make([]app.Arquivo, 0, len(cabecalhos))
@@ -26,15 +54,25 @@ func (s Servidor) criarLote(w http.ResponseWriter, r *http.Request) {
 		aberto, err := cabecalho.Open()
 		if err != nil {
 			erro(w, http.StatusBadRequest, cabecalho.Filename+": "+err.Error())
-			return
+			return nil, false
 		}
 		conteudo, err := io.ReadAll(aberto)
 		_ = aberto.Close()
 		if err != nil {
 			erro(w, http.StatusBadRequest, cabecalho.Filename+": "+err.Error())
-			return
+			return nil, false
 		}
 		arquivos = append(arquivos, app.Arquivo{Nome: cabecalho.Filename, Conteudo: conteudo})
+	}
+	return arquivos, true
+}
+
+func (s Servidor) criarLote(w http.ResponseWriter, r *http.Request) {
+	tenant := tenantDe(r.Context())
+
+	arquivos, ok := lerArquivosDoLote(w, r, s.TamanhoMaxLoteBytes)
+	if !ok {
+		return
 	}
 
 	loteID, err := s.Conferir.Executar(r.Context(), app.PedidoDeLote{
