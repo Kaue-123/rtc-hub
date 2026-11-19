@@ -1,0 +1,14 @@
+# Clones dos repositórios da RFB. Não entram no versionamento: são upstream,
+# pinados por tag no docker-compose e recriáveis por `make upstream`.
+/upstream/
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Banco local de desenvolvimento
+*.db
+*.sqlite3
+
+.env

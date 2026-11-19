@@ -1,0 +1,52 @@
+version: "2"
+sql:
+  - engine: postgresql
+    schema: internal/adapters/postgres/migrations
+    queries: internal/adapters/postgres/queries
+    gen:
+      go:
+        package: db
+        out: internal/adapters/postgres/db
+        sql_package: pgx/v5
+        # A API devolve esses structs direto; sem isto o JSON sai com nome de
+        # campo Go (RazaoSocial, Cbs) em vez de snake_case.
+        emit_json_tags: true
+        json_tags_case_style: snake
+        emit_pointers_for_null_types: true
+        emit_empty_slices: true
+        # O singularizador do sqlc é inglês e trata nome português terminado em
+        # -ia como plural latino: aliquota_vigencia viraria AliquotaVigencium.
+        rename:
+          aliquota_vigencium: "AliquotaVigencia"
+          divergencium: "Divergencia"
+          cnpj: "CNPJ"
+          crt: "CRT"
+          uf: "UF"
+          ncm: "NCM"
+        overrides:
+          # numeric vira decimal exato, nunca float: a conferência compara
+          # valor declarado com apurado e centavo importa.
+          - db_type: "pg_catalog.numeric"
+            go_type: "github.com/shopspring/decimal.Decimal"
+          - db_type: "pg_catalog.numeric"
+            nullable: true
+            go_type:
+              type: "NullDecimal"
+              import: "github.com/shopspring/decimal"
+          # time.Time em vez de pgtype: o núcleo não deve conhecer o driver.
+          - db_type: "date"
+            go_type: "time.Time"
+          - db_type: "date"
+            nullable: true
+            go_type:
+              type: "Time"
+              import: "time"
+              pointer: true
+          - db_type: "timestamptz"
+            go_type: "time.Time"
+          - db_type: "timestamptz"
+            nullable: true
+            go_type:
+              type: "Time"
+              import: "time"
+              pointer: true
